@@ -50,7 +50,7 @@ def resample_and_aggregate(data, interval="1T"):
 st.title("All Stocks for a Selected Period")
 
 # Directory setup
-training_data_dir = "./TrainingData"
+training_data_dir = "./TestData"
 stocks = ["A", "B", "C", "D", "E"]
 periods = natural_sort(os.listdir(training_data_dir))  # Natural sorting for periods
 

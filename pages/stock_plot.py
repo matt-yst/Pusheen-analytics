@@ -26,7 +26,7 @@ def load_and_combine_data(directory, stock, period):
 st.title("Interactive Stock Data Visualization")
 
 # Directory setup
-training_data_dir = "./TrainingData"
+training_data_dir = "./TestData"
 stocks = ["A", "B", "C", "D", "E"]
 periods = sorted(os.listdir(training_data_dir))
 
