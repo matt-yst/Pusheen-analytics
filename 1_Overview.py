@@ -8,7 +8,7 @@ def load_data_for_stock(directory, stock, period):
     """
     Load data for a single stock in a selected period.
     """
-    period_path = os.path.join(directory, period, stock)
+    period_path = os.path.join(directory, period, period, stock)  # Double nested `Period` folder
     column_names = ['bidVolume', 'bidPrice', 'askVolume', 'askPrice', 'timestamp']
     combined_data = pd.DataFrame()
     if os.path.exists(period_path):
@@ -29,17 +29,17 @@ def load_data_for_stock(directory, stock, period):
 st.title("Interactive Overview: Prices, Volumes, and Analysis")
 
 # Directory setup
-training_data_dir = "./TestData"
+test_data_dir = "./TestData"  # Changed directory to TestData
 stocks = ["A", "B", "C", "D", "E"]
-periods = sorted(os.listdir(training_data_dir))
+periods = sorted(os.listdir(test_data_dir)) if os.path.exists(test_data_dir) else []
 
-if os.path.exists(training_data_dir):
+if os.path.exists(test_data_dir):
     selected_period = st.selectbox("Select a period:", periods)
     selected_stock = st.selectbox("Select a stock:", stocks)
 
     if selected_period and selected_stock:
         # Load data for the selected stock
-        data = load_data_for_stock(training_data_dir, selected_stock, selected_period)
+        data = load_data_for_stock(test_data_dir, selected_stock, selected_period)
 
         if not data.empty:
             # Compute additional features
@@ -155,4 +155,4 @@ if os.path.exists(training_data_dir):
         else:
             st.warning(f"No data found for Stock {selected_stock} in {selected_period}.")
 else:
-    st.error("TrainingData directory does not exist. Please check the path.")
+    st.error("TestData directory does not exist. Please check the path.")
