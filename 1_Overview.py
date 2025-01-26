@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+from bokeh.models import ColumnDataSource, HoverTool
+from bokeh.plotting import figure
 import os
-
 
 def load_data_for_stock(directory, stock, period):
     """
@@ -27,36 +26,7 @@ def load_data_for_stock(directory, stock, period):
                     combined_data = pd.concat([combined_data, data], ignore_index=True)
     return combined_data
 
-
-def detect_sharp_drops(data, relative=False, threshold=0.02):
-    """
-    Detect sharp drops in bid prices, either absolute or relative.
-    """
-    data["midPrice"] = (data["bidPrice"] + data["askPrice"]) / 2
-    data["momentum"] = data["midPrice"].pct_change()
-
-    if relative:
-        # Use rolling z-scores for relative drop detection
-        data["z_score"] = (data["momentum"] - data["momentum"].rolling(window=30).mean()) / data["momentum"].rolling(window=30).std()
-        data["sharp_drop"] = data["z_score"] < -2  # Drops below 2 standard deviations
-    else:
-        # Absolute threshold-based detection
-        data["sharp_drop"] = data["momentum"] < -threshold
-
-    return data[data["sharp_drop"]]
-
-
-def create_timeline(drops, stock, period):
-    """
-    Create a timeline of sharp drops for the given stock and period.
-    """
-    drops["stock"] = stock
-    drops["period"] = period
-    drops["time"] = drops["timestamp"].dt.time
-    return drops[["stock", "period", "time"]]
-
-
-st.title("Overview: Bid/Ask Prices, Volumes, and Sharp Drop Analysis")
+st.title("Interactive Overview: Prices, Volumes, and Analysis")
 
 # Directory setup
 training_data_dir = "./TrainingData"
@@ -72,87 +42,116 @@ if os.path.exists(training_data_dir):
         data = load_data_for_stock(training_data_dir, selected_stock, selected_period)
 
         if not data.empty:
-            # Plot bid/ask prices and volumes
-            st.subheader("Bid/Ask Prices and Volumes")
-            fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-
-            # Price plot
-            axs[0].plot(data["timestamp"], data["bidPrice"], label="Bid Price", color="blue")
-            axs[0].plot(data["timestamp"], data["askPrice"], label="Ask Price", color="red")
-            axs[0].set_title("Bid and Ask Prices Over Time")
-            axs[0].set_ylabel("Price")
-            axs[0].legend()
-
-            # Volume plot
-            axs[1].plot(data["timestamp"], data["bidVolume"], label="Bid Volume", color="green")
-            axs[1].plot(data["timestamp"], data["askVolume"], label="Ask Volume", color="orange")
-            axs[1].set_title("Bid and Ask Volumes Over Time")
-            axs[1].set_xlabel("Timestamp")
-            axs[1].set_ylabel("Volume")
-            axs[1].legend()
-
-            plt.tight_layout()
-            st.pyplot(fig)
-
-            # Add momentum plot
+            # Compute additional features
             data["midPrice"] = (data["bidPrice"] + data["askPrice"]) / 2
-            data["momentum"] = data["midPrice"].pct_change()
+            data.set_index("timestamp", inplace=True)
+            data["std_30s"] = data["midPrice"].rolling("30s").std()
+            data["std_60s"] = data["midPrice"].rolling("60s").std()
+            data.reset_index(inplace=True)
 
-            st.subheader("Momentum Over Time")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(data["timestamp"], data["momentum"], label="Momentum", color="purple")
-            ax.axhline(-0.02, color="red", linestyle="--", label="Default Sharp Drop Threshold")
-            ax.set_title("Momentum Over Time")
-            ax.set_xlabel("Timestamp")
-            ax.set_ylabel("Momentum")
-            ax.legend()
-            st.pyplot(fig)
-
-            # Dynamic detection mode
-            detection_mode = st.radio("Select detection mode:", ["Absolute", "Relative"])
-            relative = detection_mode == "Relative"
-
-            # Sharp drop detection
-            threshold = st.slider(
-                "Set Sharp Drop Threshold (as %):",
-                min_value=0.01,
-                max_value=0.10,
-                value=0.02,
-                step=0.01,
+            # Main graph for prices
+            st.subheader("Price Data (Bid, Ask, Mid-Price)")
+            bokeh_source_prices = ColumnDataSource(data)
+            price_fig = figure(
+                x_axis_type="datetime",
+                title=f"Price Data for Stock {selected_stock} ({selected_period})",
+                plot_width=900, plot_height=400,
+                tools="pan,wheel_zoom,box_zoom,reset"
             )
-            sharp_drops = detect_sharp_drops(data, relative=relative, threshold=threshold)
+            hover_price = HoverTool(
+                tooltips=[
+                    ("Timestamp", "@timestamp{%F %T}"),
+                    ("Bid Price", "@bidPrice"),
+                    ("Ask Price", "@askPrice"),
+                    ("Mid Price", "@midPrice")
+                ],
+                formatters={"@timestamp": "datetime"}
+            )
+            price_fig.add_tools(hover_price)
+            price_fig.line("timestamp", "bidPrice", source=bokeh_source_prices, color="blue", legend_label="Bid Price")
+            price_fig.line("timestamp", "askPrice", source=bokeh_source_prices, color="red", legend_label="Ask Price")
+            price_fig.line("timestamp", "midPrice", source=bokeh_source_prices, color="green", legend_label="Mid Price")
+            price_fig.legend.location = "top_left"
+            st.bokeh_chart(price_fig, use_container_width=True)
 
-            if not sharp_drops.empty:
-                # Plot sharp drop chart
-                st.subheader("Chart of Sharp Drops")
-                fig, ax = plt.subplots(figsize=(12, 6))
-                sns.scatterplot(
-                    x="timestamp",
-                    y="bidPrice",
-                    data=sharp_drops,
-                    ax=ax,
-                    color="red",
-                    label="Sharp Drops"
-                )
-                ax.set_title("Sharp Drops in Bid Prices")
-                ax.set_xlabel("Timestamp")
-                ax.set_ylabel("Bid Price")
-                st.pyplot(fig)
+            # Standard deviation graph
+            st.subheader("Standard Deviation (30s and 60s)")
+            bokeh_source_std = ColumnDataSource(data)
+            std_fig = figure(
+                x_axis_type="datetime",
+                title=f"Standard Deviation for Stock {selected_stock} ({selected_period})",
+                plot_width=900, plot_height=400,
+                tools="pan,wheel_zoom,box_zoom,reset"
+            )
+            hover_std = HoverTool(
+                tooltips=[
+                    ("Timestamp", "@timestamp{%F %T}"),
+                    ("30s Std Dev", "@std_30s"),
+                    ("60s Std Dev", "@std_60s")
+                ],
+                formatters={"@timestamp": "datetime"}
+            )
+            std_fig.add_tools(hover_std)
+            std_fig.line("timestamp", "std_30s", source=bokeh_source_std, color="purple", legend_label="30s Std Dev", line_dash="dotted")
+            std_fig.line("timestamp", "std_60s", source=bokeh_source_std, color="orange", legend_label="60s Std Dev", line_dash="dotted")
+            std_fig.legend.location = "top_left"
+            st.bokeh_chart(std_fig, use_container_width=True)
 
-                # Display timeline of sharp drops
-                st.subheader("Timeline of Sharp Drops")
-                timeline = create_timeline(sharp_drops, stock=selected_stock, period=selected_period)
-                st.dataframe(timeline)
+            # Volume graph
+            st.subheader("Volume Data (Bid and Ask)")
+            bokeh_source_volumes = ColumnDataSource(data)
+            volume_fig = figure(
+                x_axis_type="datetime",
+                title=f"Volume Data for Stock {selected_stock} ({selected_period})",
+                plot_width=900, plot_height=400,
+                tools="pan,wheel_zoom,box_zoom,reset"
+            )
+            hover_volume = HoverTool(
+                tooltips=[
+                    ("Timestamp", "@timestamp{%F %T}"),
+                    ("Bid Volume", "@bidVolume"),
+                    ("Ask Volume", "@askVolume")
+                ],
+                formatters={"@timestamp": "datetime"}
+            )
+            volume_fig.add_tools(hover_volume)
+            volume_fig.line("timestamp", "bidVolume", source=bokeh_source_volumes, color="gray", legend_label="Bid Volume")
+            volume_fig.line("timestamp", "askVolume", source=bokeh_source_volumes, color="lightblue", legend_label="Ask Volume")
+            volume_fig.legend.location = "top_left"
+            st.bokeh_chart(volume_fig, use_container_width=True)
 
-                # Downloadable timeline
-                csv = timeline.to_csv(index=False)
-                st.download_button(
-                    label="Download Timeline as CSV",
-                    data=csv,
-                    file_name="sharp_drop_timeline.csv"
-                )
-            else:
-                st.info("No sharp drops detected for the selected stock and period with the current settings.")
+            # Highlight low/high points
+            st.subheader("Daily Low and High Highlights")
+            low_high_source = ColumnDataSource(data)
+            daily_low = data["midPrice"].min()
+            daily_high = data["midPrice"].max()
+            low_high_fig = figure(
+                x_axis_type="datetime",
+                title=f"Daily Low and High for Stock {selected_stock} ({selected_period})",
+                plot_width=900, plot_height=400,
+                tools="pan,wheel_zoom,box_zoom,reset"
+            )
+            hover_low_high = HoverTool(
+                tooltips=[
+                    ("Timestamp", "@timestamp{%F %T}"),
+                    ("Mid Price", "@midPrice")
+                ],
+                formatters={"@timestamp": "datetime"}
+            )
+            low_high_fig.add_tools(hover_low_high)
+            low_high_fig.line("timestamp", "midPrice", source=low_high_source, color="green", legend_label="Mid Price")
+            low_high_fig.circle(
+                x=data[data["midPrice"] == daily_low]["timestamp"],
+                y=[daily_low],
+                size=10, color="cyan", legend_label="Daily Low"
+            )
+            low_high_fig.circle(
+                x=data[data["midPrice"] == daily_high]["timestamp"],
+                y=[daily_high],
+                size=10, color="magenta", legend_label="Daily High"
+            )
+            low_high_fig.legend.location = "top_left"
+            st.bokeh_chart(low_high_fig, use_container_width=True)
         else:
             st.warning(f"No data found for Stock {selected_stock} in {selected_period}.")
 else:
